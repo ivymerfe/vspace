@@ -49,6 +49,11 @@ main :: proc() {
 	for !glfw.WindowShouldClose(g_window) {
 		glfw.PollEvents()
 		update()
+		w, h := glfw.GetFramebufferSize(g_window)
+		if window_shown && (w == 0 || h == 0) {
+			glfw.WaitEvents()
+			continue
+		}
 		if g_should_reload_shaders {
 			vk.QueueWaitIdle(g_graphics_queue)
 			recreate_pipeline()
