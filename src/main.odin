@@ -13,8 +13,17 @@ import vk "vendor:vulkan"
 g_context: runtime.Context
 g_window: glfw.WindowHandle
 g_window_resized := false
+
 g_recompiling_shaders := false
 g_should_reload_shaders := false
+
+g_movement_vector := [3]f32{0, 0, 0}
+g_speed : f32 = 0.1
+g_is_capturing_mouse := false
+g_sensitivity_x := 0.1
+g_sensitivity_y := 0.08
+g_yaw := 0.0
+g_pitch := 0.0
 
 main :: proc() {
 	context.logger = log.create_console_logger()
@@ -34,6 +43,9 @@ main :: proc() {
 	}
 
 	glfw.SetKeyCallback(g_window, on_input)
+	g_last_cursor_x, g_last_cursor_y = glfw.GetCursorPos(g_window)
+	glfw.SetCursorPosCallback(g_window, on_cursor_pos)
+	glfw.SetInputMode(g_window, glfw.RAW_MOUSE_MOTION, 1)
 	init_vulkan()
 	defer destroy_vulkan()
 
@@ -69,16 +81,81 @@ main :: proc() {
 	vk.DeviceWaitIdle(g_device)
 }
 
+@(private = "file")
 on_input :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i32) {
 	context = g_context
 	if action == glfw.PRESS {
-		if key == glfw.KEY_C {
-			recompile_shaders()
+		switch key {
+			case glfw.KEY_C: {
+				recompile_shaders()
+			}
+			case glfw.KEY_E: {
+				g_is_capturing_mouse = !g_is_capturing_mouse
+				update_cursor()
+			}
+			case glfw.KEY_R: {
+				g_cameraPos = {0,0,0}
+				g_yaw = 0
+				g_pitch = 0
+			}
+			case glfw.KEY_Q: {
+				log.infof("Camera is at %f %f %f", g_cameraPos.x, g_cameraPos.y, g_cameraPos.z)
+			}
+		}
+	}
+	if action == glfw.REPEAT {
+		return
+	}
+	factor : f32 = 1 if action == glfw.PRESS else -1
+	switch key {
+		case glfw.KEY_W: {
+			g_movement_vector[2] -= factor
+		}
+		case glfw.KEY_S: {
+			g_movement_vector[2] += factor
+		}
+		case glfw.KEY_D: {
+			g_movement_vector[0] += factor
+		}
+		case glfw.KEY_A: {
+			g_movement_vector[0] -= factor
+		}
+		case glfw.KEY_SPACE: {
+			g_movement_vector[1] += factor
+		}
+		case glfw.KEY_LEFT_SHIFT: {
+			g_movement_vector[1] -= factor
 		}
 	}
 }
 
+@(private = "file")
+g_last_cursor_x := 0.0
 
+@(private = "file")
+g_last_cursor_y := 0.0
+
+@(private = "file")
+on_cursor_pos :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
+	context = g_context
+	if g_is_capturing_mouse {
+		dx, dy := x - g_last_cursor_x, y - g_last_cursor_y
+		g_yaw += dx * g_sensitivity_x
+		g_pitch = clamp(g_pitch - dy * g_sensitivity_y, -90.0, 90.0)
+	}
+	g_last_cursor_x, g_last_cursor_y = x, y
+}
+
+@(private = "file")
+update_cursor :: proc() {
+	if g_is_capturing_mouse {
+		glfw.SetInputMode(g_window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+	} else {
+		glfw.SetInputMode(g_window, glfw.CURSOR, glfw.CURSOR_NORMAL)
+	}
+}
+
+@(private = "file")
 recompile_shaders :: proc() {
 	if g_recompiling_shaders {
 		return

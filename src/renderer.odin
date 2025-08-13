@@ -1,6 +1,8 @@
 package vspace
 
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:math/linalg/glsl"
 import "core:mem"
 import "core:time"
@@ -8,7 +10,8 @@ import vk "vendor:vulkan"
 
 SHADER_FILE :: "shaders/shaders.spv"
 
-MAX_VERTICES_IN_BUFFER :: 1024
+MAX_BLOCKS_IN_BUFFER :: 1024
+VERTICES_IN_BLOCK :: 36
 
 g_pipeline: vk.Pipeline
 g_pipeline_layout: vk.PipelineLayout
@@ -16,30 +19,30 @@ g_vertex_buffer: vk.Buffer
 g_vertex_buffer_memory: vk.DeviceMemory
 g_vertex_buffer_mapped: rawptr
 
-g_stopwatch: time.Stopwatch
-
-InputData :: struct {
+BlockData :: struct {
 	pos:   glsl.vec3,
 	color: glsl.vec3,
 }
 
 SceneConstants :: struct {
-	time: f32,
+	mvp: glsl.mat4,
 }
 
 g_scene: SceneConstants
+g_cameraPos: glsl.vec3
+g_cameraMat: glsl.mat4
+g_projMat: glsl.mat4
+g_fov: f32 = 45.0
+g_stopwatch: time.Stopwatch
 
-INPUT :: []InputData {
-	{{0.0, -0.5 * 1.41, 0.9}, {1.0, 1.0, 1.0}},
-	{{0.5, 0.5, 0}, {0.0, 1.0, 0.0}},
-	{{-0.5, 0.5, 0}, {0.0, 0.0, 1.0}},
-	{{0.5, -0.5 * 1.41, 0}, {1.0, 1.0, 1.0}},
-	{{1.5, 0.5, 0}, {0.0, 1.0, 0.0}},
-	{{0.5, 0.5, 0}, {0.0, 0.0, 1.0}},
+INPUT :: []BlockData {
+	{{0.0, -1.0, -2.0}, {0.4, 0.8, 0.8}},
+	{{0.0, -1.0, -3.0}, {0.4, 0.8, 0.8}},
+	{{0.0, -2.0, -3.0}, {0.4, 0.8, 0.8}},
 }
 
 create_renderer :: proc() {
-    time.stopwatch_start(&g_stopwatch)
+	time.stopwatch_start(&g_stopwatch)
 	create_pipeline()
 	create_resources()
 }
@@ -50,41 +53,84 @@ destroy_renderer :: proc() {
 }
 
 update :: proc() {
-	g_scene.time = auto_cast time.duration_seconds(time.stopwatch_duration(g_stopwatch))
+	{
+		angle_xy := math.to_radians(g_yaw)
+		c := f32(math.cos(angle_xy))
+		s := f32(math.sin(angle_xy))
+		movement := [3]f32 {
+			c * g_movement_vector[0] - s * g_movement_vector[2],
+			g_movement_vector[1],
+			s * g_movement_vector[0] + c * g_movement_vector[2],
+		}
+		g_cameraPos += movement * {g_speed, g_speed, g_speed}
+	}
+	yaw_rad := f32(math.to_radians(g_yaw))
+	pitch_rad := f32(math.to_radians(g_pitch))
+	rot_matrix := linalg.matrix4_from_euler_angles_xyz(pitch_rad, yaw_rad, 0)
+	g_cameraMat = rot_matrix * linalg.matrix4_translate(-g_cameraPos * {1, -1, 1})
+	aspect_ratio := f32(g_swapchain_extent.width) / f32(g_swapchain_extent.height)
+	g_projMat = glsl.mat4Perspective(g_fov, aspect_ratio, 0.05, 1000)
+	g_scene.mvp = g_projMat * g_cameraMat
 }
 
-record_commands :: proc(cmd_buffer: vk.CommandBuffer, image_index: u32) {
+record_commands :: proc(cmd_buffer: vk.CommandBuffer, frame_index, image_index: u32) {
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 	}
 	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
+
+	current_image := g_swapchain_images[image_index]
 	transition_image_layout(
 		cmd_buffer,
-		image_index,
+		current_image,
 		.UNDEFINED,
 		.COLOR_ATTACHMENT_OPTIMAL,
 		{},
 		{.COLOR_ATTACHMENT_WRITE},
 		{.TOP_OF_PIPE},
 		{.COLOR_ATTACHMENT_OUTPUT},
+		{.COLOR}
 	)
-	clear_value := vk.ClearValue {
+	transition_image_layout(
+		cmd_buffer,
+		g_depth_images[frame_index],
+		.UNDEFINED,
+		.DEPTH_ATTACHMENT_OPTIMAL,
+		{},
+		{.DEPTH_STENCIL_ATTACHMENT_WRITE},
+		{.TOP_OF_PIPE},
+		{.EARLY_FRAGMENT_TESTS},
+		{.DEPTH}
+	)
+	clear_color := vk.ClearValue {
 		color = {float32 = [4]f32{0.1, 0.1, 0.1, 1.}},
 	}
-	attachment_info := vk.RenderingAttachmentInfo {
+	color_attachment := vk.RenderingAttachmentInfo {
 		sType       = .RENDERING_ATTACHMENT_INFO,
 		imageView   = g_swapchain_image_views[image_index],
 		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
 		loadOp      = .CLEAR,
 		storeOp     = .STORE,
-		clearValue  = clear_value,
+		clearValue  = clear_color,
+	}
+	clear_depth := vk.ClearValue {
+		depthStencil = {1.0, 0},
+	}
+	depth_attachment := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = g_depth_image_views[frame_index],
+		imageLayout = .DEPTH_ATTACHMENT_OPTIMAL,
+		loadOp      = .CLEAR,
+		storeOp     = .DONT_CARE,
+		clearValue  = clear_depth,
 	}
 	rendering_info := vk.RenderingInfo {
 		sType = .RENDERING_INFO,
 		renderArea = {offset = {0, 0}, extent = g_swapchain_extent},
 		layerCount = 1,
 		colorAttachmentCount = 1,
-		pColorAttachments = &attachment_info,
+		pColorAttachments = &color_attachment,
+		pDepthAttachment = &depth_attachment,
 	}
 	vk.CmdBeginRendering(cmd_buffer, &rendering_info)
 	vk.CmdBindPipeline(cmd_buffer, .GRAPHICS, g_pipeline)
@@ -111,17 +157,18 @@ record_commands :: proc(cmd_buffer: vk.CommandBuffer, image_index: u32) {
 		size_of(SceneConstants),
 		&g_scene,
 	)
-	vk.CmdDraw(cmd_buffer, u32(len(INPUT)), 1, 0, 0)
+	vk.CmdDraw(cmd_buffer, VERTICES_IN_BLOCK, u32(len(INPUT)), 0, 0)
 	vk.CmdEndRendering(cmd_buffer)
 	transition_image_layout(
 		cmd_buffer,
-		image_index,
+		current_image,
 		.COLOR_ATTACHMENT_OPTIMAL,
 		.PRESENT_SRC_KHR,
 		{.COLOR_ATTACHMENT_WRITE},
 		{},
 		{.COLOR_ATTACHMENT_OUTPUT},
 		{.BOTTOM_OF_PIPE},
+		{.COLOR}
 	)
 	vk.EndCommandBuffer(cmd_buffer)
 }
@@ -130,7 +177,7 @@ record_commands :: proc(cmd_buffer: vk.CommandBuffer, image_index: u32) {
 create_resources :: proc() {
 	buffer_info := vk.BufferCreateInfo {
 		sType       = .BUFFER_CREATE_INFO,
-		size        = size_of(InputData) * MAX_VERTICES_IN_BUFFER,
+		size        = size_of(BlockData) * MAX_BLOCKS_IN_BUFFER,
 		sharingMode = .EXCLUSIVE,
 		usage       = {.VERTEX_BUFFER},
 	}
@@ -149,7 +196,7 @@ create_resources :: proc() {
 			&g_vertex_buffer_mapped,
 		),
 	)
-	mem.copy(g_vertex_buffer_mapped, raw_data(INPUT), len(INPUT) * size_of(InputData))
+	mem.copy(g_vertex_buffer_mapped, raw_data(INPUT), len(INPUT) * size_of(BlockData))
 	log.info("Created renderer resources")
 }
 
@@ -160,8 +207,8 @@ destroy_resources :: proc() {
 }
 
 recreate_pipeline :: proc() {
-    destroy_pipeline()
-    create_pipeline()
+	destroy_pipeline()
+	create_pipeline()
 }
 
 @(private = "file")
@@ -183,11 +230,11 @@ create_pipeline :: proc() {
 		pDynamicStates    = raw_data(dynamic_states),
 	}
 	vertex_bindings := []vk.VertexInputBindingDescription {
-		{binding = 0, stride = size_of(InputData), inputRate = .VERTEX},
+		{binding = 0, stride = size_of(BlockData), inputRate = .INSTANCE},
 	}
 	attribute_descriptions := []vk.VertexInputAttributeDescription {
-		{0, 0, .R32G32B32_SFLOAT, u32(offset_of(InputData, pos))},
-		{1, 0, .R32G32B32_SFLOAT, u32(offset_of(InputData, color))},
+		{0, 0, .R32G32B32_SFLOAT, u32(offset_of(BlockData, pos))},
+		{1, 0, .R32G32B32_SFLOAT, u32(offset_of(BlockData, color))},
 	}
 	vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
 		sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -225,6 +272,12 @@ create_pipeline :: proc() {
 		attachmentCount = 1,
 		pAttachments    = &color_blend_attachment,
 	}
+	depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+		sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		depthTestEnable  = true,
+		depthWriteEnable = true,
+		depthCompareOp   = .LESS,
+	}
 
 	module, success := load_shaders_from_file(SHADER_FILE)
 	if !success {
@@ -247,6 +300,8 @@ create_pipeline :: proc() {
 		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
 		colorAttachmentCount    = 1,
 		pColorAttachmentFormats = &g_swapchain_format.format,
+		depthAttachmentFormat   = .D32_SFLOAT,
+		stencilAttachmentFormat = .UNDEFINED,
 	}
 	pipeline_info := vk.GraphicsPipelineCreateInfo {
 		sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -260,6 +315,7 @@ create_pipeline :: proc() {
 		pMultisampleState   = &multisampling,
 		pColorBlendState    = &color_blending,
 		pDynamicState       = &dynamic_state,
+		pDepthStencilState  = &depth_stencil_state,
 		layout              = g_pipeline_layout,
 		subpass             = 0,
 		basePipelineIndex   = -1,

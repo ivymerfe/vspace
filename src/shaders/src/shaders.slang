@@ -9,11 +9,12 @@ struct VertexOutput
 {
     float4 position : SV_Position;
     float3 fragColor : TEXCOORD0; // Will match fragment input
+    float3 blockRelative : BLOCK_RELATIVE;
 };
 
 struct SceneConstants
 {
-    float time;
+    float4x4 mvp;
 }
 
 [[vk::push_constant]]
@@ -25,12 +26,42 @@ float3 hsv2rgb(float3 c) {
     return c.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
+static const float3 BLOCK_VERTICES[36] = {
+    // Front face (clockwise)
+    float3(-0.5, -0.5,  0.5), float3( 0.5, -0.5,  0.5), float3( 0.5,  0.5,  0.5),
+    float3( 0.5,  0.5,  0.5), float3(-0.5,  0.5,  0.5), float3(-0.5, -0.5,  0.5),
+    
+    // Back face (counter-clockwise when viewed from front)
+    float3( 0.5, -0.5, -0.5), float3(-0.5, -0.5, -0.5), float3(-0.5,  0.5, -0.5),
+    float3(-0.5,  0.5, -0.5), float3( 0.5,  0.5, -0.5), float3( 0.5, -0.5, -0.5),
+    
+    // Left face (counter-clockwise when viewed from front)
+    float3(-0.5, -0.5, -0.5), float3(-0.5, -0.5,  0.5), float3(-0.5,  0.5,  0.5),
+    float3(-0.5,  0.5,  0.5), float3(-0.5,  0.5, -0.5), float3(-0.5, -0.5, -0.5),
+    
+    // Right face (clockwise when viewed from front)
+    float3( 0.5, -0.5,  0.5), float3( 0.5, -0.5, -0.5), float3( 0.5,  0.5, -0.5),
+    float3( 0.5,  0.5, -0.5), float3( 0.5,  0.5,  0.5), float3( 0.5, -0.5,  0.5),
+    
+    // Top face (clockwise when viewed from above)
+    float3(-0.5,  0.5,  0.5), float3( 0.5,  0.5,  0.5), float3( 0.5,  0.5, -0.5),
+    float3( 0.5,  0.5, -0.5), float3(-0.5,  0.5, -0.5), float3(-0.5,  0.5,  0.5),
+    
+    // Bottom face (counter-clockwise when viewed from above)
+    float3(-0.5, -0.5, -0.5), float3( 0.5, -0.5, -0.5), float3( 0.5, -0.5,  0.5),
+    float3( 0.5, -0.5,  0.5), float3(-0.5, -0.5,  0.5), float3(-0.5, -0.5, -0.5)
+};
+
 [shader("vertex")]
 VertexOutput vsMain(VertexInput input)
 {
     VertexOutput output;
-    output.position = float4(input.pos, 1.0);
-    output.fragColor = input.color*hsv2rgb(float3(cos(scene.time)*cos(scene.time), 0.9, 0.9)), 0.8;
+    input.pos.y *= -1;
+    float3 blockRelative = BLOCK_VERTICES[input.vertexIndex];
+    float3 pos = blockRelative + input.pos;
+    output.position = mul(scene.mvp, float4(pos, 1.0));
+    output.fragColor = input.color;
+    output.blockRelative = blockRelative;
     return output;
 }
 
@@ -38,6 +69,7 @@ struct FragmentInput
 {
     float4 position : SV_Position;
     float3 fragColor : TEXCOORD0; // Location 0 interpolated input
+    float3 blockRelative : BLOCK_RELATIVE;
 };
 
 struct FragmentOutput
@@ -49,6 +81,7 @@ struct FragmentOutput
 FragmentOutput psMain(FragmentInput input)
 {
     FragmentOutput output;
-    output.outColor = float4(input.fragColor, 1);
+    float dist = 1 - length(input.blockRelative);
+    output.outColor = float4(hsv2rgb(input.fragColor), 1) * dist;
     return output;
 }

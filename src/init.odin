@@ -32,8 +32,12 @@ g_command_pool: vk.CommandPool
 
 g_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer
 g_image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
-g_render_finished_semaphores: []vk.Semaphore  // Per image
+g_render_finished_semaphores: []vk.Semaphore // Per image
 g_in_flight_fences: [MAX_FRAMES_IN_FLIGHT]vk.Fence
+
+g_depth_images: [MAX_FRAMES_IN_FLIGHT]vk.Image
+g_depth_image_views: [MAX_FRAMES_IN_FLIGHT]vk.ImageView
+g_depth_images_memory: [MAX_FRAMES_IN_FLIGHT]vk.DeviceMemory
 
 vk_try :: proc(result: vk.Result, location := #caller_location) {
 	if result != .SUCCESS {
@@ -49,7 +53,8 @@ init_vulkan :: proc() {
 	vk_pick_device()
 	vk_create_logical_device()
 	vk_create_swapchain()
-	
+	vk_create_depth_images()
+
 	cmd_pool_info := vk.CommandPoolCreateInfo {
 		sType            = .COMMAND_POOL_CREATE_INFO,
 		flags            = {.RESET_COMMAND_BUFFER},
@@ -77,7 +82,7 @@ init_vulkan :: proc() {
 		vk_try(vk.CreateSemaphore(g_device, &sem_info, nil, &g_image_available_semaphores[i]))
 		vk_try(vk.CreateFence(g_device, &fence_info, nil, &g_in_flight_fences[i]))
 	}
-	for i in 0..< g_swapchain_image_count {
+	for i in 0 ..< g_swapchain_image_count {
 		vk_try(vk.CreateSemaphore(g_device, &sem_info, nil, &g_render_finished_semaphores[i]))
 	}
 
@@ -85,16 +90,17 @@ init_vulkan :: proc() {
 }
 
 destroy_vulkan :: proc() {
-    for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroySemaphore(g_device, g_image_available_semaphores[i], nil)
 		vk.DestroyFence(g_device, g_in_flight_fences[i], nil)
 	}
-    for i in 0..< g_swapchain_image_count {
-        vk.DestroySemaphore(g_device, g_render_finished_semaphores[i], nil)
-    }
-    delete(g_render_finished_semaphores)
+	for i in 0 ..< g_swapchain_image_count {
+		vk.DestroySemaphore(g_device, g_render_finished_semaphores[i], nil)
+	}
+	delete(g_render_finished_semaphores)
 	vk.DestroyCommandPool(g_device, g_command_pool, nil)
 
+	vk_destroy_depth_images()
 	vk_destroy_swapchain()
 	vk.DestroyDevice(g_device, nil)
 	vk.DestroySurfaceKHR(g_instance, g_surface, nil)
@@ -127,9 +133,9 @@ render :: proc(frame_index: u32) {
 	}
 	vk_try(vk.ResetFences(g_device, 1, &fence))
 	vk.ResetCommandBuffer(buffer, {})
-	record_commands(buffer, image_index)
+	record_commands(buffer, frame_index, image_index)
 
-    sem_render_finished := g_render_finished_semaphores[image_index]
+	sem_render_finished := g_render_finished_semaphores[image_index]
 	submit_info := vk.SubmitInfo {
 		sType                = .SUBMIT_INFO,
 		waitSemaphoreCount   = 1,
@@ -280,7 +286,7 @@ vk_create_logical_device :: proc() {
 					sType = .PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT,
 					extendedDynamicState = true,
 				},
-                synchronization2 = true,
+				synchronization2 = true,
 				dynamicRendering = true,
 			},
 		},
@@ -424,7 +430,7 @@ vk_create_swapchain :: proc() {
 	{
 		image_count: u32
 		vk_try(vk.GetSwapchainImagesKHR(g_device, g_swapchain, &image_count, nil))
-        g_swapchain_image_count = image_count
+		g_swapchain_image_count = image_count
 		g_swapchain_images = make([]vk.Image, image_count)
 		vk_try(
 			vk.GetSwapchainImagesKHR(
@@ -460,14 +466,46 @@ vk_destroy_swapchain :: proc() {
 	vk.DestroySwapchainKHR(g_device, g_swapchain, nil)
 }
 
+@(private = "file")
+vk_create_depth_images :: proc() {
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		g_depth_images[i], g_depth_images_memory[i] = create_2d_image(
+			.D32_SFLOAT,
+			g_swapchain_extent.width,
+			g_swapchain_extent.height,
+			{.DEPTH_STENCIL_ATTACHMENT, .TRANSIENT_ATTACHMENT},
+			.UNDEFINED,
+		)
+		view_info := vk.ImageViewCreateInfo {
+			sType            = .IMAGE_VIEW_CREATE_INFO,
+			image            = g_depth_images[i],
+			viewType         = .D2,
+			format           = .D32_SFLOAT,
+			subresourceRange = {{.DEPTH}, 0, 1, 0, 1},
+		}
+		vk_try(vk.CreateImageView(g_device, &view_info, nil, &g_depth_image_views[i]))
+	}
+}
+
+@(private = "file")
+vk_destroy_depth_images :: proc() {
+	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+		vk.DestroyImageView(g_device, g_depth_image_views[i], nil)
+		vk.DestroyImage(g_device, g_depth_images[i], nil)
+		vk.FreeMemory(g_device, g_depth_images_memory[i], nil)
+	}
+}
+
 recreate_swapchain :: proc() {
 	w, h := glfw.GetFramebufferSize(g_window)
 	if w == 0 || h == 0 {
 		return
 	}
 	vk.DeviceWaitIdle(g_device)
+	vk_destroy_depth_images()
 	vk_destroy_swapchain()
 	vk_create_swapchain()
+	vk_create_depth_images()
 }
 
 @(private = "file")
