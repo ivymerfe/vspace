@@ -45,6 +45,7 @@ main :: proc() {
 	glfw.SetKeyCallback(g_window, on_input)
 	g_last_cursor_x, g_last_cursor_y = glfw.GetCursorPos(g_window)
 	glfw.SetCursorPosCallback(g_window, on_cursor_pos)
+	glfw.SetScrollCallback(g_window, on_scroll)
 	glfw.SetInputMode(g_window, glfw.RAW_MOUSE_MOTION, 1)
 	init_vulkan()
 	defer destroy_vulkan()
@@ -144,6 +145,11 @@ on_cursor_pos :: proc "c" (window: glfw.WindowHandle, x, y: f64) {
 		g_pitch = clamp(g_pitch - dy * g_sensitivity_y, -90.0, 90.0)
 	}
 	g_last_cursor_x, g_last_cursor_y = x, y
+}
+
+@(private="file")
+on_scroll :: proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
+	g_speed = max(0, g_speed + f32(0.005*yoffset));
 }
 
 @(private = "file")

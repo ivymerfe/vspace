@@ -33,16 +33,17 @@ g_cameraPos: glsl.vec3
 g_cameraMat: glsl.mat4
 g_projMat: glsl.mat4
 g_fov: f32 = 45.0
-g_stopwatch: time.Stopwatch
+g_world_timer: time.Stopwatch
 
 INPUT :: []BlockData {
 	{{0.0, -1.0, -2.0}, {0.4, 0.8, 0.8}},
-	{{0.0, -1.0, -3.0}, {0.4, 0.8, 0.8}},
-	{{0.0, -2.0, -3.0}, {0.4, 0.8, 0.8}},
+	{{0.0, -1.0, -3.0}, {0.5, 0.8, 0.8}},
+	{{0.0, -2.0, -3.0}, {0.6, 0.8, 0.8}},
+	{{1.0, -2.0, -3.0}, {0.1, 0.8, 0.8}},
 }
 
 create_renderer :: proc() {
-	time.stopwatch_start(&g_stopwatch)
+	time.stopwatch_start(&g_world_timer)
 	create_pipeline()
 	create_resources()
 }
