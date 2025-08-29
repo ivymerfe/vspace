@@ -1,9 +1,15 @@
-package vspace
+package renderer
 
+import "base:runtime"
 import "core:log"
 import "core:slice"
+import "core:time"
 import glfw "vendor:glfw"
 import vk "vendor:vulkan"
+
+g_renderer_context: runtime.Context
+g_window: glfw.WindowHandle
+g_window_resized := false
 
 g_instance: vk.Instance
 g_surface: vk.SurfaceKHR
@@ -34,10 +40,35 @@ g_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer
 g_image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
 g_render_finished_semaphores: []vk.Semaphore // Per image
 g_in_flight_fences: [MAX_FRAMES_IN_FLIGHT]vk.Fence
+g_acquire_fences: [MAX_FRAMES_IN_FLIGHT]vk.Fence
 
 g_depth_images: [MAX_FRAMES_IN_FLIGHT]vk.Image
 g_depth_image_views: [MAX_FRAMES_IN_FLIGHT]vk.ImageView
 g_depth_images_memory: [MAX_FRAMES_IN_FLIGHT]vk.DeviceMemory
+
+create :: proc(width, height: i32, title: cstring) {
+	g_renderer_context = context
+
+	glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
+	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
+	g_window = glfw.CreateWindow(width, height, title, nil, nil)
+	if g_window == nil {
+		log.panicf("Failed to create window")
+	}
+	glfw.SetFramebufferSizeCallback(g_window, proc "c" (_: glfw.WindowHandle, _, _: i32) {
+		context = g_renderer_context
+		g_window_resized = true
+	})
+	init_vulkan()
+	create_world_renderer()
+}
+
+destroy :: proc() {
+	vk.DeviceWaitIdle(g_device)
+	destroy_world_renderer()
+	destroy_vulkan()
+	glfw.DestroyWindow(g_window)
+}
 
 vk_try :: proc(result: vk.Result, location := #caller_location) {
 	if result != .SUCCESS {
@@ -45,6 +76,7 @@ vk_try :: proc(result: vk.Result, location := #caller_location) {
 	}
 }
 
+@(private)
 init_vulkan :: proc() {
 	vk_create_instance()
 
@@ -81,6 +113,7 @@ init_vulkan :: proc() {
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk_try(vk.CreateSemaphore(g_device, &sem_info, nil, &g_image_available_semaphores[i]))
 		vk_try(vk.CreateFence(g_device, &fence_info, nil, &g_in_flight_fences[i]))
+		vk_try(vk.CreateFence(g_device, &fence_info, nil, &g_acquire_fences[i]))
 	}
 	for i in 0 ..< g_swapchain_image_count {
 		vk_try(vk.CreateSemaphore(g_device, &sem_info, nil, &g_render_finished_semaphores[i]))
@@ -89,10 +122,12 @@ init_vulkan :: proc() {
 	log.info("Vulkan initialised")
 }
 
+@(private)
 destroy_vulkan :: proc() {
 	for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
 		vk.DestroySemaphore(g_device, g_image_available_semaphores[i], nil)
 		vk.DestroyFence(g_device, g_in_flight_fences[i], nil)
+		vk.DestroyFence(g_device, g_acquire_fences[i], nil)
 	}
 	for i in 0 ..< g_swapchain_image_count {
 		vk.DestroySemaphore(g_device, g_render_finished_semaphores[i], nil)
@@ -107,20 +142,27 @@ destroy_vulkan :: proc() {
 	vk.DestroyInstance(g_instance, nil)
 }
 
-render :: proc(frame_index: u32) {
+render :: proc(camera: Camera, frame_index: u32) {
 	fence := g_in_flight_fences[frame_index]
-	vk_try(vk.WaitForFences(g_device, 1, &g_in_flight_fences[frame_index], true, max(u64)))
+
+	// t1 := time.now()
+	vk_try(vk.WaitForFences(g_device, 1, &fence, true, max(u64)))
+	vk_try(vk.ResetFences(g_device, 1, &fence))
+	// t2 := time.now()
+	// d1 := time.duration_milliseconds(time.diff(t1, t2))
 
 	sem_image_available := g_image_available_semaphores[frame_index]
-	buffer := g_command_buffers[frame_index]
+	fence_acquire := g_acquire_fences[frame_index]
+
+	vk_try(vk.ResetFences(g_device, 1, &fence_acquire))
 
 	image_index: u32
 	acquire_result := vk.AcquireNextImageKHR(
 		g_device,
 		g_swapchain,
-		max(u64),
-		sem_image_available,
 		0,
+		sem_image_available,
+		fence_acquire,
 		&image_index,
 	)
 	#partial switch acquire_result {
@@ -131,9 +173,17 @@ render :: proc(frame_index: u32) {
 	case:
 		log.panicf("vulkan: acquire next image failure: %v", acquire_result)
 	}
-	vk_try(vk.ResetFences(g_device, 1, &fence))
+	vk_try(vk.WaitForFences(g_device, 1, &fence_acquire, true, max(u64)))
+
+	// t3 := time.now()
+	// d2 := time.duration_milliseconds(time.diff(t2, t3))
+
+	// log.infof("\x1b[2J\x1b[HF1: %.4f  F2: %.4f", d1, d2)
+
+	buffer := g_command_buffers[frame_index]
+
 	vk.ResetCommandBuffer(buffer, {})
-	record_commands(buffer, frame_index, image_index)
+	record_commands(camera, buffer, frame_index, image_index)
 
 	sem_render_finished := g_render_finished_semaphores[image_index]
 	submit_info := vk.SubmitInfo {
@@ -234,7 +284,7 @@ vk_messenger_callback :: proc "system" (
 	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
 	pUserData: rawptr,
 ) -> b32 {
-	context = g_context
+	context = g_renderer_context
 
 	level: log.Level
 	if .ERROR in messageSeverity {

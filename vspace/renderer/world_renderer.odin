@@ -1,4 +1,4 @@
-package vspace
+package renderer
 
 import "core:log"
 import "core:math"
@@ -8,7 +8,7 @@ import "core:mem"
 import "core:time"
 import vk "vendor:vulkan"
 
-SHADER_FILE :: "shaders/shaders.spv"
+SHADER_FILE :: "shaders/bin/world.spv"
 
 MAX_BLOCKS_IN_BUFFER :: 1024
 VERTICES_IN_BLOCK :: 36
@@ -21,60 +21,60 @@ g_vertex_buffer_mapped: rawptr
 
 BlockData :: struct {
 	pos:   glsl.vec3,
-	color: glsl.vec3,
+	color: f32,
 }
 
 SceneConstants :: struct {
 	mvp: glsl.mat4,
+	yaw: f32,
 }
 
-g_scene: SceneConstants
-g_cameraPos: glsl.vec3
-g_cameraMat: glsl.mat4
-g_projMat: glsl.mat4
-g_fov: f32 = 45.0
-g_world_timer: time.Stopwatch
+Camera :: struct {
+	fov:   f32,
+	pos:   glsl.vec3,
+	yaw:   f32,
+	pitch: f32,
+}
 
 INPUT :: []BlockData {
-	{{0.0, -1.0, -2.0}, {0.4, 0.8, 0.8}},
-	{{0.0, -1.0, -3.0}, {0.5, 0.8, 0.8}},
-	{{0.0, -2.0, -3.0}, {0.6, 0.8, 0.8}},
-	{{1.0, -2.0, -3.0}, {0.1, 0.8, 0.8}},
+	{{0.0, -1.0, -2.0}, 0.4},
+	{{0.0, -1.0, -3.0}, 0.5},
+	{{0.0, -2.0, -3.0}, 0.8},
+	{{1.0, -2.0, -3.0}, 0.1},
+	{{2.0, -2.0, -3.0}, 0.15},
+	{{2.0, -3.0, -3.0}, 0.3},
 }
 
-create_renderer :: proc() {
-	time.stopwatch_start(&g_world_timer)
+@(private)
+create_world_renderer :: proc() {
 	create_pipeline()
 	create_resources()
 }
 
-destroy_renderer :: proc() {
+@(private)
+destroy_world_renderer :: proc() {
 	destroy_resources()
 	destroy_pipeline()
 }
 
-update :: proc() {
-	{
-		angle_xy := math.to_radians(g_yaw)
-		c := f32(math.cos(angle_xy))
-		s := f32(math.sin(angle_xy))
-		movement := [3]f32 {
-			c * g_movement_vector[0] - s * g_movement_vector[2],
-			g_movement_vector[1],
-			s * g_movement_vector[0] + c * g_movement_vector[2],
-		}
-		g_cameraPos += movement * {g_speed, g_speed, g_speed}
-	}
-	yaw_rad := f32(math.to_radians(g_yaw))
-	pitch_rad := f32(math.to_radians(g_pitch))
+g_last_yaw: f32 = 0
+
+get_scene_constants :: proc(camera: Camera) -> SceneConstants {
+	yaw_rad := math.to_radians(camera.yaw)
+	g_last_yaw = yaw_rad
+	pitch_rad := math.to_radians(camera.pitch)
 	rot_matrix := linalg.matrix4_from_euler_angles_xyz(pitch_rad, yaw_rad, 0)
-	g_cameraMat = rot_matrix * linalg.matrix4_translate(-g_cameraPos * {1, -1, 1})
+	view_matrix := rot_matrix * linalg.matrix4_translate(-camera.pos * {1, -1, 1})
 	aspect_ratio := f32(g_swapchain_extent.width) / f32(g_swapchain_extent.height)
-	g_projMat = glsl.mat4Perspective(g_fov, aspect_ratio, 0.05, 1000)
-	g_scene.mvp = g_projMat * g_cameraMat
+	projection_matrix := glsl.mat4Perspective(camera.fov, aspect_ratio, 0.05, 1000)
+	return SceneConstants{mvp = projection_matrix * view_matrix, yaw = yaw_rad}
 }
 
-record_commands :: proc(cmd_buffer: vk.CommandBuffer, frame_index, image_index: u32) {
+record_commands :: proc(
+	camera: Camera,
+	cmd_buffer: vk.CommandBuffer,
+	frame_index, image_index: u32,
+) {
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 	}
@@ -90,7 +90,7 @@ record_commands :: proc(cmd_buffer: vk.CommandBuffer, frame_index, image_index: 
 		{.COLOR_ATTACHMENT_WRITE},
 		{.TOP_OF_PIPE},
 		{.COLOR_ATTACHMENT_OUTPUT},
-		{.COLOR}
+		{.COLOR},
 	)
 	transition_image_layout(
 		cmd_buffer,
@@ -101,7 +101,7 @@ record_commands :: proc(cmd_buffer: vk.CommandBuffer, frame_index, image_index: 
 		{.DEPTH_STENCIL_ATTACHMENT_WRITE},
 		{.TOP_OF_PIPE},
 		{.EARLY_FRAGMENT_TESTS},
-		{.DEPTH}
+		{.DEPTH},
 	)
 	clear_color := vk.ClearValue {
 		color = {float32 = [4]f32{0.1, 0.1, 0.1, 1.}},
@@ -150,13 +150,15 @@ record_commands :: proc(cmd_buffer: vk.CommandBuffer, frame_index, image_index: 
 	)
 	vk.CmdSetScissor(cmd_buffer, 0, 1, &vk.Rect2D{offset = {0, 0}, extent = g_swapchain_extent})
 	vk.CmdBindVertexBuffers(cmd_buffer, 0, 1, &g_vertex_buffer, raw_data([]vk.DeviceSize{0}))
+
+	constants := get_scene_constants(camera)
 	vk.CmdPushConstants(
 		cmd_buffer,
 		g_pipeline_layout,
 		{.VERTEX},
 		0,
 		size_of(SceneConstants),
-		&g_scene,
+		&constants,
 	)
 	vk.CmdDraw(cmd_buffer, VERTICES_IN_BLOCK, u32(len(INPUT)), 0, 0)
 	vk.CmdEndRendering(cmd_buffer)
@@ -169,7 +171,7 @@ record_commands :: proc(cmd_buffer: vk.CommandBuffer, frame_index, image_index: 
 		{},
 		{.COLOR_ATTACHMENT_OUTPUT},
 		{.BOTTOM_OF_PIPE},
-		{.COLOR}
+		{.COLOR},
 	)
 	vk.EndCommandBuffer(cmd_buffer)
 }
@@ -208,6 +210,7 @@ destroy_resources :: proc() {
 }
 
 recreate_pipeline :: proc() {
+	vk.QueueWaitIdle(g_graphics_queue)
 	destroy_pipeline()
 	create_pipeline()
 }

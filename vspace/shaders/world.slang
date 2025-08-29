@@ -1,7 +1,11 @@
+module world;
+
+import color_utils;
+
 struct VertexInput
 {
     float3 pos;
-    float3 color;
+    float color;
     uint vertexIndex : SV_VertexID;
 }
 
@@ -16,6 +20,7 @@ struct VertexOutput
 struct SceneConstants
 {
     float4x4 mvp;
+    float yaw;
 }
 
 [[vk::push_constant]]
@@ -71,7 +76,7 @@ VertexOutput vsMain(VertexInput input)
     float3 blockRelative = BLOCK_VERTICES[input.vertexIndex];
     float3 pos = blockRelative + input.pos;
     output.position = mul(scene.mvp, float4(pos, 1.0));
-    output.fragColor = hsv2rgb(input.color);
+    output.fragColor = lch2rgb(float3(0.8, 0.8, input.color));
     output.blockRelative = blockRelative;
     output.faceNormal = FACE_NORMALS[input.vertexIndex / 6];
     return output;

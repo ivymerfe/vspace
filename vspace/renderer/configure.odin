@@ -1,4 +1,4 @@
-package vspace
+package renderer
 
 import vk "vendor:vulkan"
 
