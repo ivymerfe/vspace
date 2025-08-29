@@ -570,11 +570,11 @@ choose_swapchain_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Su
 
 @(private = "file")
 choose_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
-	// for mode in modes {
-	// 	if mode == .MAILBOX {
-	// 		return .MAILBOX
-	// 	}
-	// }
+	for mode in modes {
+		if mode == .MAILBOX {
+			return .MAILBOX
+		}
+	}
 	return .FIFO
 }
 

@@ -97,7 +97,7 @@ main :: proc() {
 		sync.atomic_store(&g_read_camera, write_camera)
 		write_camera = &g_camera2 if write_camera == &g_camera1 else &g_camera1
 
-		//time.sleep(time.Millisecond)
+		time.sleep(time.Millisecond)
 	}
 	sync.atomic_store(&g_renderer_running, false)
 	thread.join(render_thread)
@@ -123,13 +123,14 @@ render_thread_func :: proc(current_frame_index: rawptr) {
 		if delta > 30 {
 			log.infof("Rendering took %.3fms (%.3f fps)", delta, 1000 / delta)
 		}
-		// log.infof("\x1b[2J\x1b[HFPS: %.3f", 1000 / delta)
+		//log.infof("\x1b[2J\x1b[HFPS: %.3f", 1000 / delta)
 
 		sync.mutex_unlock(&g_render_mutex)
 		if sync.atomic_load(&g_delaying) {
 			time.sleep(time.Millisecond * 50)
 			sync.atomic_store(&g_delaying, false)
 		}
+		time.sleep(1 * time.Millisecond)
 	}
 }
 
