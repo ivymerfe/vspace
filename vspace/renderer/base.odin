@@ -49,7 +49,8 @@ g_depth_images_memory: [MAX_FRAMES_IN_FLIGHT]vk.DeviceMemory
 create :: proc(width, height: i32, title: cstring) {
 	g_renderer_context = context
 
-	glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
+	// Fails on linux
+	//glfw.WindowHint(glfw.VISIBLE, glfw.FALSE)
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	g_window = glfw.CreateWindow(width, height, title, nil, nil)
 	if g_window == nil {

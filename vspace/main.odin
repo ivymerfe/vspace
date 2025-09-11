@@ -1,9 +1,9 @@
 package vspace
 
-import "core:math/rand"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:math/rand"
 import "core:os/os2"
 import "core:slice"
 import "core:strings"
@@ -51,11 +51,6 @@ main :: proc() {
 	glfw.SetScrollCallback(window, on_scroll)
 	glfw.SetInputMode(window, glfw.RAW_MOUSE_MOTION, 1)
 
-	frame_index: u32 = 0
-	renderer.render(input.g_camera, frame_index)
-	frame_index = (frame_index + 1) % renderer.MAX_FRAMES_IN_FLIGHT
-	glfw.ShowWindow(window)
-
 	prev_x, prev_y := glfw.GetCursorPos(window)
 	stopwatch: time.Stopwatch
 	time.stopwatch_start(&stopwatch)
@@ -66,10 +61,7 @@ main :: proc() {
 	write_camera := &g_camera2
 
 	g_renderer_running = true
-	render_thread := thread.create_and_start_with_data(
-		rawptr(uintptr(frame_index)),
-		render_thread_func,
-	)
+	render_thread := thread.create_and_start(render_thread_func)
 
 	for !glfw.WindowShouldClose(window) {
 		glfw.PollEvents()
@@ -92,7 +84,7 @@ main :: proc() {
 		prev_time = current_time
 
 		input.tick_input(f32(time_delta))
-		
+
 		write_camera^ = input.g_camera
 		sync.atomic_store(&g_read_camera, write_camera)
 		write_camera = &g_camera2 if write_camera == &g_camera1 else &g_camera1
@@ -103,9 +95,9 @@ main :: proc() {
 	thread.join(render_thread)
 }
 
-render_thread_func :: proc(current_frame_index: rawptr) {
+render_thread_func :: proc() {
 	context = g_context
-	frame_index := u32(uintptr(current_frame_index))
+	frame_index : u32 = 0
 	stopwatch: time.Stopwatch
 	time.stopwatch_start(&stopwatch)
 	prev_time := time.stopwatch_duration(stopwatch)
