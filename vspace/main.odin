@@ -184,7 +184,7 @@ recompile_shaders :: proc() {
 		context = g_context
 		desc := os2.Process_Desc {
 			working_dir = "shaders",
-			command     = []string{"cmd.exe", "/c compile_shaders.bat"},
+			command     = []string{"bash", "compile.sh"},
 		}
 		state, stdout, stderr, err := os2.process_exec(desc, g_context.allocator)
 		log.info(strings.truncate_to_byte(string(stdout), 0))
