@@ -57,11 +57,8 @@ destroy_world_renderer :: proc() {
 	destroy_pipeline()
 }
 
-g_last_yaw: f32 = 0
-
 get_scene_constants :: proc(camera: Camera) -> SceneConstants {
 	yaw_rad := math.to_radians(camera.yaw)
-	g_last_yaw = yaw_rad
 	pitch_rad := math.to_radians(camera.pitch)
 	rot_matrix := linalg.matrix4_from_euler_angles_xyz(pitch_rad, yaw_rad, 0)
 	view_matrix := rot_matrix * linalg.matrix4_translate(-camera.pos * {1, -1, 1})

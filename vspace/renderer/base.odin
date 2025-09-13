@@ -145,12 +145,9 @@ destroy_vulkan :: proc() {
 
 render :: proc(camera: Camera, frame_index: u32) {
 	fence := g_in_flight_fences[frame_index]
-
-	// t1 := time.now()
+	
 	vk_try(vk.WaitForFences(g_device, 1, &fence, true, max(u64)))
 	vk_try(vk.ResetFences(g_device, 1, &fence))
-	// t2 := time.now()
-	// d1 := time.duration_milliseconds(time.diff(t1, t2))
 
 	sem_image_available := g_image_available_semaphores[frame_index]
 	fence_acquire := g_acquire_fences[frame_index]
@@ -175,11 +172,6 @@ render :: proc(camera: Camera, frame_index: u32) {
 		log.panicf("vulkan: acquire next image failure: %v", acquire_result)
 	}
 	vk_try(vk.WaitForFences(g_device, 1, &fence_acquire, true, max(u64)))
-
-	// t3 := time.now()
-	// d2 := time.duration_milliseconds(time.diff(t2, t3))
-
-	// log.infof("\x1b[2J\x1b[HF1: %.4f  F2: %.4f", d1, d2)
 
 	buffer := g_command_buffers[frame_index]
 
@@ -571,11 +563,11 @@ choose_swapchain_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Su
 
 @(private = "file")
 choose_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
-	for mode in modes {
-		if mode == .MAILBOX {
-			return .MAILBOX
-		}
-	}
+	// for mode in modes {
+	// 	if mode == .MAILBOX {
+	// 		return .MAILBOX
+	// 	}
+	// }
 	return .FIFO
 }
 

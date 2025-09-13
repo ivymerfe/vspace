@@ -32,8 +32,6 @@ g_camera1: renderer.Camera
 g_camera2: renderer.Camera
 g_read_camera: ^renderer.Camera
 
-g_delaying := false
-
 main :: proc() {
 	context.logger = log.create_console_logger()
 	g_context = context
@@ -115,14 +113,8 @@ render_thread_func :: proc() {
 		if delta > 30 {
 			log.infof("Rendering took %.3fms (%.3f fps)", delta, 1000 / delta)
 		}
-		//log.infof("\x1b[2J\x1b[HFPS: %.3f", 1000 / delta)
 
 		sync.mutex_unlock(&g_render_mutex)
-		if sync.atomic_load(&g_delaying) {
-			time.sleep(time.Millisecond * 50)
-			sync.atomic_store(&g_delaying, false)
-		}
-		time.sleep(1 * time.Millisecond)
 	}
 }
 
@@ -150,9 +142,6 @@ on_input :: proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: i3
 				log.infof("Camera is at %f %f %f", pos.x, pos.y, pos.z)
 			}
 		}
-	}
-	if key == glfw.KEY_P {
-		sync.atomic_store(&g_delaying, true)
 	}
 	input.handle_input(key, action)
 }
