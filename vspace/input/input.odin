@@ -2,7 +2,7 @@ package input
 
 import "../renderer"
 import "core:math"
-import "core:log"
+
 import glfw "vendor:glfw"
 
 InputSettings :: struct {
@@ -77,8 +77,9 @@ handle_input :: proc(key, action: i32) {
 		1 if key == g_input_settings.key_right else -1 if key == g_input_settings.key_left else 0
 	up: f32 =
 		1 if key == g_input_settings.key_up else -1 if key == g_input_settings.key_down else 0
-	
-	g_input_state.yawr += factor if key == glfw.KEY_RIGHT else -factor if key == glfw.KEY_LEFT else 0
+
+	g_input_state.yawr +=
+		factor if key == glfw.KEY_RIGHT else -factor if key == glfw.KEY_LEFT else 0
 	add_movement(forward * factor, sideways * factor, up * factor)
 }
 

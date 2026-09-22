@@ -5,10 +5,10 @@ import "core:math"
 import "core:math/linalg"
 import "core:math/linalg/glsl"
 import "core:mem"
-import "core:time"
+
 import vk "vendor:vulkan"
 
-SHADER_FILE :: "shaders/bin/world.spv"
+SHADER_FILE :: "shaders/world.spv"
 
 MAX_BLOCKS_IN_BUFFER :: 1024
 VERTICES_IN_BLOCK :: 36

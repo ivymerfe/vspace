@@ -3,8 +3,8 @@ package renderer
 import "base:runtime"
 import "core:log"
 import "core:slice"
-import "core:time"
-import glfw "vendor:glfw"
+
+import "vendor:glfw"
 import vk "vendor:vulkan"
 
 g_renderer_context: runtime.Context
@@ -158,7 +158,7 @@ render :: proc(camera: Camera, frame_index: u32) {
 	acquire_result := vk.AcquireNextImageKHR(
 		g_device,
 		g_swapchain,
-		0,
+		max(u64),
 		sem_image_available,
 		fence_acquire,
 		&image_index,
